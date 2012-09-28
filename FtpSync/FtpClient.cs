@@ -83,15 +83,25 @@ namespace FtpSync
 
 		public FtpDirInfo GetDirectoryContent(string path, bool recursive = true)
 		{
-			var filelist = GetFileList(path);
-			var details = GetFileListDetail(path);
+			var filelist = GetFileList(path).OrderByDescending(s => s.Length).ToArray();
+			var details = GetFileListDetail(path).ToList();
 
 			var result = new FtpDirInfo {DirName = path};
 
 			foreach (var file in filelist)
 			{
+				// THIS IS SHIT! if there are files with names like "a.php" and "a a.php", this fails. Oh my god...
+				// I need much smarter parser for detailed filelist, damned. Now we just go from longest file 
 				var fullInfo = details.FirstOrDefault(dir => dir.EndsWith(" " + file));
-				if (fullInfo == null) continue;
+
+				if (fullInfo == null)
+				{
+					Log.Warning("Couldn't verify file {0} on server.".Expand(file));
+					continue;
+				}
+
+				// remove it -> no conflicts with shitty files
+				details.Remove(fullInfo);
 
 				if (fullInfo.StartsWith("d"))
 				{
@@ -113,14 +123,18 @@ namespace FtpSync
 			return result;
 		}
 
-		public string[] GetFileList(string path)
+		public IEnumerable<string> GetFileList(string path)
 		{
-			return ExecuteStreamString(WebRequestMethods.Ftp.ListDirectory, path).Split(new[] {'\n', '\r'}, StringSplitOptions.RemoveEmptyEntries);
+			return ExecuteStreamString(WebRequestMethods.Ftp.ListDirectory, path)
+				.Split(new[] {'\n', '\r'}, StringSplitOptions.RemoveEmptyEntries)
+				.Select(Path.GetFileName);
 		}
 
-		public string[] GetFileListDetail(string path)
+		public IEnumerable<string> GetFileListDetail(string path)
 		{
-			return ExecuteStreamString(WebRequestMethods.Ftp.ListDirectoryDetails, path).Split(new[] {'\n', '\r'}, StringSplitOptions.RemoveEmptyEntries);
+			return ExecuteStreamString(WebRequestMethods.Ftp.ListDirectoryDetails, path)
+				.Split(new[] {'\n', '\r'}, StringSplitOptions.RemoveEmptyEntries);
+			//.Select(s => s.Trim('"', '\'', ' '));
 		}
 
 		private void Execute(string method, string path)
@@ -216,12 +230,12 @@ namespace FtpSync
 
 							if (_conflictResolver.OverwriteFileWhenNoLocalInfo(filename))
 							{
-								Log.Warning("File {0} is already on server, overwritten (change IgnoreInitialServerChanges to skip).");
+								Log.Warning("File {0} is already on server, overwritten (change IgnoreInitialServerChanges to skip).".Expand(filename));
 								performUpload = true;
 							}
 							else
 							{
-								Log.Warning("File {0} is already on server, skipped (change IgnoreInitialServerChanges to overwrite).");
+								Log.Warning("File {0} is already on server, skipped (change IgnoreInitialServerChanges to overwrite).".Expand(filename));
 								syncFileInfo.UpdateFtpDetail = false;
 							}
 						}
@@ -315,7 +329,7 @@ namespace FtpSync
 
 						Try(() => MakeDirectory(
 							path: ftpDirectory.DirName.CombineFtp(dirname)),
-						    initialMessage: "Creating directory {0}...",
+						    initialMessage: "Creating directory {0}...".Expand(dirname),
 						    onError: () =>
 						    	{
 						    		dirExists = false;

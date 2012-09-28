@@ -10,7 +10,7 @@ namespace FtpSync
 	{
 		static void Main(string[] args)
 		{
-			// args = new[] {@"c:\Users\Pz\Documents\dev\sync.cfg"};
+			args = new[] {@"c:\Users\Pz\Documents\dev\praettest.cfg"};
 
 			if (!ParseArgs(args))
 			{
