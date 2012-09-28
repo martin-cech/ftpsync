@@ -17,17 +17,22 @@ namespace FtpSync
 		public bool UploadChangesOnly { get; set; }
 		public bool IgnoreServerChanges { get; set; }
 		public bool IgnoreInitialServerChanges { get; set; }
+		public bool AskOnConflict { get; set; }
 
 		public List<SyncFileInfo> SyncInfos { get; private set; }
 
-		public Configuration()
+		private readonly string _path;
+
+		public Configuration(string path)
 		{
+			_path = path;
 			SyncInfos = new List<SyncFileInfo>();
 			NewSyncInfos = new List<SyncFileInfo>();
 		}
 
 
 		public List<SyncFileInfo> NewSyncInfos { get; private set; }
+
 
 		public void UpdateLocalFile(SyncFileInfo syncFileInfo)
 		{
@@ -38,35 +43,36 @@ namespace FtpSync
 		{
 			XElement doc = XDocument.Load(filename).Element("document");
 
-			var cfg = doc.Element("config");
+			var cfgNode = doc.Element("config");
 
-			var config = new Configuration();
+			var configuration = new Configuration(filename);
 
-			config.KeepNonexistingLocalFilesOnServer = bool.Parse(cfg.Element("KeepNonexistingLocalFilesOnServer").Value);
-			config.KeepNonexistingLocalFoldersOnServer = bool.Parse(cfg.Element("KeepNonexistingLocalFoldersOnServer").Value);
-			config.UploadChangesOnly = bool.Parse(cfg.Element("UploadChangesOnly").Value);
-			config.IgnoreServerChanges = bool.Parse(cfg.Element("IgnoreServerChanges").Value);
-			config.IgnoreInitialServerChanges = bool.Parse(cfg.Element("IgnoreInitialServerChanges").Value);
+			configuration.KeepNonexistingLocalFilesOnServer = cfgNode.SafeParseBool("KeepNonexistingLocalFilesOnServer");
+			configuration.KeepNonexistingLocalFoldersOnServer = cfgNode.SafeParseBool("KeepNonexistingLocalFoldersOnServer");
+			configuration.UploadChangesOnly = cfgNode.SafeParseBool("UploadChangesOnly");
+			configuration.IgnoreServerChanges = cfgNode.SafeParseBool("IgnoreServerChanges");
+			configuration.IgnoreInitialServerChanges = cfgNode.SafeParseBool("IgnoreInitialServerChanges");
+			configuration.AskOnConflict = cfgNode.SafeParseBool("AskOnConflict", true);
 
-			config.Username = cfg.Element("Username").Value;
-			config.Password = cfg.Element("Password").Value;
-			config.LocalFolder = cfg.Element("LocalFolder").Value;
-			config.ServerRoot = cfg.Element("ServerRoot").Value;
+			configuration.Username = cfgNode.GetSonValue("Username");
+			configuration.Password = cfgNode.GetSonValue("Password");
+			configuration.LocalFolder = cfgNode.GetSonValue("LocalFolder");
+			configuration.ServerRoot = cfgNode.GetSonValue("ServerRoot");
 
 			var files = doc.Element("files").Elements("file").Select(
 				e => new SyncFileInfo
 				     	{
-				     		FtpInfo = e.Element("ftpinfo").Value,
-				     		LocalInfo = e.Element("localinfo").Value,
-				     		LocalPath = e.Element("localpath").Value,
+				     		FtpDetail = e.GetSonValue("ftpdetail"),
+							LocalDetail = e.GetSonValue("localdetail"),
+							LocalPath = e.GetSonValue("localpath"),
 				     	});
 
-			config.SyncInfos.AddRange(files);
+			configuration.SyncInfos.AddRange(files);
 
-			return config;
+			return configuration;
 		}
 
-		public void SaveToFile(string filename)
+		public void Save(string path = null)
 		{
 			var doc = new XDocument(
 				new XElement("document",
@@ -76,6 +82,7 @@ namespace FtpSync
 				                          new XElement("UploadChangesOnly", UploadChangesOnly),
 				                          new XElement("IgnoreServerChanges", IgnoreServerChanges),
 				                          new XElement("IgnoreInitialServerChanges", IgnoreInitialServerChanges),
+										  new XElement("AskOnConflict", AskOnConflict),
 
 				                          new XElement("Username", Username),
 				                          new XElement("Password", Password),
@@ -87,12 +94,12 @@ namespace FtpSync
 				                          	.Select(i =>
 				                          	        new XElement("file",
 				                          	                     new XElement("localpath", i.LocalPath),
-				                          	                     new XElement("localinfo", i.LocalInfo),
-				                          	                     new XElement("ftpinfo", i.FtpInfo)))
+				                          	                     new XElement("localdetail", i.LocalDetail),
+				                          	                     new XElement("ftpdetail", i.FtpDetail)))
 				                          	.Cast<object>()
 				                          	.ToArray())));
 
-			doc.Save(filename);
+			doc.Save(path ?? _path);
 		}
 	}
 }

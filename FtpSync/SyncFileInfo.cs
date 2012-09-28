@@ -7,7 +7,9 @@ namespace FtpSync
 	public class SyncFileInfo
 	{
 		public string LocalPath { get; set; }
-		public string LocalInfo { get; set; }
-		public string FtpInfo { get; set; }
+		public string LocalDetail { get; set; }
+		public string FtpDetail { get; set; }
+
+		public bool UpdateFtpDetail { get; set; }
 	}
 }

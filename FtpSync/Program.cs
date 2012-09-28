@@ -10,7 +10,7 @@ namespace FtpSync
 	{
 		static void Main(string[] args)
 		{
-			args = new[] {@"c:\Users\Pz\Documents\dev\sync.cfg"};
+			// args = new[] {@"c:\Users\Pz\Documents\dev\sync.cfg"};
 
 			if (!ParseArgs(args))
 			{
@@ -66,19 +66,20 @@ namespace FtpSync
 			{
 				Console.WriteLine("The config file has been created.");
 
-				new Configuration
+				new Configuration(cfgPath)
 					{
 						Username = "your login here",
 						Password = "guess what here",
 						ServerRoot = "www.your-damned-ftp.com/rootfolder/likethis",
 						LocalFolder = @"x:\bloodycustomer\uselessweb",
 
+						AskOnConflict = true,
 						KeepNonexistingLocalFilesOnServer = true,
 						KeepNonexistingLocalFoldersOnServer = true,
 						IgnoreInitialServerChanges = false,
 						IgnoreServerChanges = false,
 						UploadChangesOnly = true
-					}.SaveToFile(cfgPath);
+					}.Save();
 			}
 		}
 	}

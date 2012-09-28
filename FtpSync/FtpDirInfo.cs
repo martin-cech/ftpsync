@@ -30,7 +30,7 @@ namespace FtpSync
 
 		public void AddFile(string filename, string fullInfo = null)
 		{
-			Files.Add(new FtpFileInfo { FileName = DirName.CombineFtp(filename), FullInfo = fullInfo });
+			Files.Add(new FtpFileInfo { FileName = DirName.CombineFtp(filename), FtpDetail = fullInfo });
 		}
 
 		public void AddDirectory(FtpDirInfo ftpDirInfo, string fullInfo = null)

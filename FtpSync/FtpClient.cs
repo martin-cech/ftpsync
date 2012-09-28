@@ -12,12 +12,15 @@ namespace FtpSync
 		private readonly Configuration _configuration;
 		private readonly NetworkCredential _credentials;
 		private readonly string _configPath;
+		private readonly IConflictResolver _conflictResolver;
 
 		public FtpClient(string configPath)
 		{
 			_configPath = configPath;
 			_configuration = Configuration.LoadFromFile(_configPath);
 			_credentials = new NetworkCredential(_configuration.Username, _configuration.Password);
+
+			_conflictResolver = _configuration.AskOnConflict ? (IConflictResolver) new CuriousConflictResolver() : new DefaultConflictResolver(_configuration);
 		}
 
 		public void MakeDirectory(string path)
@@ -152,201 +155,288 @@ namespace FtpSync
 
 		public void Synchronize()
 		{
-			Sync(_configuration.LocalFolder, GetDirectoryContent(_configuration.ServerRoot), _configuration);
-			_configuration.SaveToFile(_configPath);
+			try
+			{
+				Sync(_configuration.LocalFolder, GetDirectoryContent(_configuration.ServerRoot), _configuration);
+			}
+			catch(Exception ex)
+			{
+				Handle(ex);
+			}
+
+			// always save changes - if some files were uploaded, we need to know!
+			_configuration.Save();
 		}
 
-		private void Sync(string localDirectory, FtpDirInfo dirInfo, Configuration config)
+
+		private void Sync(string localDirectory, FtpDirInfo ftpDirectory, Configuration config)
 		{
 			var files = Directory.GetFiles(localDirectory);
-			var syncInfos = config.SyncInfos;
-
-			var filesToDelete = dirInfo.Files.ToList();
+			var filesToDelete = ftpDirectory.Files.ToList();
 
 			var localFileInfos = new Dictionary<string, SyncFileInfo>();
-			var conflictedFiles = new List<FtpFileInfo>();
 
 			// check all files in current directory
 			foreach (var fullfilename in files)
 			{
 				var filename = Path.GetFileName(fullfilename);
 				var fullLocalPath = localDirectory.CombinePath(filename);
-				var syncFileInfo = new SyncFileInfo {LocalPath = fullLocalPath, LocalInfo = GetFileFullInfo(fullfilename)};
-
-				localFileInfos.Add(filename, syncFileInfo);
-
-				var syncInfo = syncInfos.FirstOrDefault(i => i.LocalPath == fullLocalPath);
-				var ftpInfo = dirInfo.Files.FirstOrDefault(i => i.FileName == dirInfo.DirName.CombineFtp(filename));
+				var syncFileInfo = new SyncFileInfo
+				                   	{
+				                   		LocalPath = fullLocalPath,
+				                   		LocalDetail = GetFileFullInfo(fullfilename),
+				                   		UpdateFtpDetail = true
+				                   	};
 
 				bool performUpload = false;
+				var ftpInfo = ftpDirectory.Files.FirstOrDefault(i => i.FileName == ftpDirectory.DirName.CombineFtp(filename));
 
-				filesToDelete.Remove(ftpInfo);
-
-
-				// is file already known to client?
-				if (syncInfo == null)
+				try
 				{
-					if (ftpInfo == null)
+					localFileInfos.Add(filename, syncFileInfo);
+
+					var oldSyncInfo = config.SyncInfos.FirstOrDefault(i => i.LocalPath == fullLocalPath);
+
+
+					if (ftpInfo != null) filesToDelete.Remove(ftpInfo);
+
+					// untracked file
+					if (oldSyncInfo == null || string.IsNullOrEmpty(oldSyncInfo.FtpDetail))
 					{
-						// file is not on server
-						performUpload = true;
-					}
-					else
-					{
-						// file is already on server - depends on settings now
-						if (config.IgnoreInitialServerChanges)
+						if (ftpInfo == null)
 						{
-							Log.Warning("File {0} is already on server, but since IgnoreInitialServerChanges is true, the file will be overriden.");
+							// file is not on server
 							performUpload = true;
 						}
 						else
 						{
-							Log.Warning("File {0} is already on server, but since IgnoreInitialServerChanges is false, the file will be skipped.");
-							conflictedFiles.Add(ftpInfo);
-						}
-					}
-				}
-				else
-				{
-					if (ftpInfo == null)
-					{
-						// file is not on server -> upload
-						performUpload = true;
-					}
-					else
-					{
-						if (syncInfo.FtpInfo != ftpInfo.FullInfo)
-						{
-							// TODO: state, when file is changed on both sides is now considered a conflict
+							// file is already on server but not localy treated, we don't know, if the server and client file are the same.
+							// Idea: we could download the file and compare, then we'd know if there is conflict or not,
+							// but if the files differ, we would still have to decide wheather overwrite or skip. This is easier.
 
-							if (string.IsNullOrEmpty(syncInfo.FtpInfo))
+							if (_conflictResolver.OverwriteFileWhenNoLocalInfo(filename))
 							{
-								// file is on server, but we don't have the info => upload
-								if (config.IgnoreInitialServerChanges)
-								{
-									Log.Warning("File {0} is on server, overriden.".Expand(filename));
-									performUpload = true;
-								}
-								else
-								{
-									Log.Warning("File {0} is already on the server, not uploading (empty local info).".Expand(filename));
-									conflictedFiles.Add(ftpInfo);
-								}
-							}
-							else
-							{
-								if (config.IgnoreServerChanges)
-								{
-									Log.Warning("File {0} has been modified on server, overriden.".Expand(filename));
-									performUpload = true;
-								}
-								else
-								{
-									Log.Warning("File {0} has already been modified on server.".Expand(filename));
-									conflictedFiles.Add(ftpInfo);
-								}
-							}
-						}
-						else
-						{
-							// file has changed or we upload all files -> upload
-							if ((syncInfo.LocalInfo != GetFileFullInfo(fullfilename)) || !config.UploadChangesOnly)
-							{
+								Log.Warning("File {0} is already on server, overwritten (change IgnoreInitialServerChanges to skip).");
 								performUpload = true;
 							}
 							else
 							{
-								Log.Verbose("File not changed ({0})".Expand(filename));
+								Log.Warning("File {0} is already on server, skipped (change IgnoreInitialServerChanges to overwrite).");
+								syncFileInfo.UpdateFtpDetail = false;
 							}
 						}
 					}
-				}
+					else
+					{
+						// tracked file
 
-				if (performUpload)
+						if (ftpInfo == null)
+						{
+							// not on server -> new -> upload
+							performUpload = true;
+						}
+						else
+						{
+							// we have current version from server
+							if (oldSyncInfo.FtpDetail == ftpInfo.FtpDetail)
+							{
+								// file has changed locally or we upload all files -> upload
+								if ((oldSyncInfo.LocalDetail != GetFileFullInfo(fullfilename)) || !config.UploadChangesOnly)
+								{
+									performUpload = true;
+								}
+								else
+								{
+									Log.Verbose("File not changed ({0})".Expand(filename));
+								}
+							}
+							else
+							{
+								// server has different version than we have -> server change -> conflict
+								if (_conflictResolver.OverwriteServerModified(filename))
+								{
+									Log.Warning("File {0} modified on server, overwritten (change IgnoreServerChanges to skip).".Expand(filename));
+									performUpload = true;
+								}
+								else
+								{
+									Log.Warning("File {0} modified on server, skipped (change IgnoreServerChanges to overwrite).".Expand(filename));
+									syncFileInfo.UpdateFtpDetail = false;
+								}
+							}
+						}
+					}
+
+					if (performUpload)
+					{
+						Try(() =>
+						    UploadFile(fullfilename, ftpDirectory.DirName.CombineFtp(filename)),
+						    "Uploading file {0}...".Expand(filename),
+						    len => "{0} bytes uploaded".Expand(len));
+
+						//Log.Info("File {0} uploaded ({1} bytes)".Expand(filename, len));
+					}
+				}
+				catch (Exception e)
 				{
-					var len = UploadFile(fullfilename, dirInfo.DirName.CombineFtp(filename));
-					Log.Info("File {0} uploaded ({1} bytes)".Expand(filename, len));
+					Handle(e);
+					syncFileInfo.UpdateFtpDetail = false;
+					//if (!conflictedFiles.Contains(ftpInfo)) conflictedFiles.Add(ftpInfo);
 				}
 			}
 
-			// delete those ftp files, that are not present on client (optional)
-			if (!config.KeepNonexistingLocalFilesOnServer)
+			foreach (var fileInfo in filesToDelete)
 			{
-				foreach (var fileInfo in filesToDelete)
+				if (_conflictResolver.DeleteFile(fileInfo.FileName))
 				{
-					Log.Info("File {0} deleted.".Expand(fileInfo.FileName));
-					DeleteFile(fileInfo.FileName);
+					Try(() => DeleteFile(fileInfo.FileName),
+					    "Deleting file {0}...".Expand(fileInfo.FileName));
 				}
 			}
 
 			// recursively process directories on client
-			var dirs = Directory.GetDirectories(localDirectory);
+			var localDirs = Directory.GetDirectories(localDirectory);
 
-			var unprocessedFtpDirs = dirInfo.Directories.ToList();
+			var ftpDirsToDelete = ftpDirectory.Directories.ToList();
 
-			foreach (var fulldirname in dirs)
+			foreach (var localDir in localDirs)
 			{
-				var dirname = new DirectoryInfo(fulldirname).Name;
-				var ftpFullPath = dirInfo.DirName.CombineFtp(dirname);
-				var subdirInfo = dirInfo.Directories.FirstOrDefault(d => d.DirName == ftpFullPath);
-
-				if (subdirInfo == null)
+				try
 				{
-					// directory is not on server => create
-					Log.Info("Directory {0} created".Expand(ftpFullPath));
-					MakeDirectory(dirInfo.DirName.CombineFtp(dirname));
-					subdirInfo = new FtpDirInfo {DirName = ftpFullPath};
-				}
-				else
-				{
-					unprocessedFtpDirs.Remove(subdirInfo);
-				}
+					var dirname = new DirectoryInfo(localDir).Name;
+					var ftpFullPath = ftpDirectory.DirName.CombineFtp(dirname);
+					var subdirInfo = ftpDirectory.Directories.FirstOrDefault(d => d.DirName == ftpFullPath);
 
-				Sync(localDirectory.CombinePath(dirname), subdirInfo, config);
+					bool dirExists = true;
+
+					if (subdirInfo == null)
+					{
+						// directory is not on server => create
+
+						Try(() => MakeDirectory(
+							path: ftpDirectory.DirName.CombineFtp(dirname)),
+						    initialMessage: "Creating directory {0}...",
+						    onError: () =>
+						    	{
+						    		dirExists = false;
+						    	});
+
+						subdirInfo = new FtpDirInfo {DirName = ftpFullPath};
+					}
+					else
+					{
+						ftpDirsToDelete.Remove(subdirInfo);
+					}
+
+					if (dirExists)
+					{
+						Sync(localDirectory.CombinePath(dirname), subdirInfo, config);
+					}
+					else
+					{
+						Log.Error("Directory {0} was not synchronized.".Expand(dirname));
+					}
+				}
+				catch (Exception ex)
+				{
+					Handle(ex);
+				}
 			}
 
 			// delete ftp directories which have been deleted on client (optional)
-			if (!config.KeepNonexistingLocalFoldersOnServer)
+			//if (!config.KeepNonexistingLocalFoldersOnServer)
 			{
-				foreach (var dir in unprocessedFtpDirs)
-				{
-					Log.Info("Directory {0} deleted.".Expand(dir.DirName));
-					DeleteDirectory(dir);
-				}
+				ftpDirsToDelete.ForEach(
+					dir =>
+						{
+							if (_conflictResolver.DeleteDirectory(dir.DirName))
+							{
+								Try(
+									() => DeleteDirectory(dir),
+									"Deleting directory {0}...".Expand(dir.DirName)
+									);
+							}
+						});
 			}
 
 			// update ftpinfo on local settings to remember the current state for each file (not directories)
-			var ftpInfos = GetDirectoryContent(dirInfo.DirName, false);
+			var ftpInfos = GetDirectoryContent(ftpDirectory.DirName, false);
 
+			// update local files state - we already have everything except ftpinfo in syncInfos
 			foreach (var localInfo in localFileInfos)
 			{
-				// skip files that were not uploaded
-				var ftpPath = dirInfo.DirName.CombineFtp(localInfo.Key);
+				var filename = localInfo.Key;
+				var newSyncFileInfo = localInfo.Value;
+
+				var ftpPath = ftpDirectory.DirName.CombineFtp(filename);
+
 				//if (filesToDelete.Any(fi => fi.FileName == ftpPath)) continue;
+				//var conflictedFile = conflictedFiles.FirstOrDefault(cf => cf.FileName == ftpPath);
 
-				var conflictedFile = conflictedFiles.FirstOrDefault(cf => cf.FileName == ftpPath);
+				//var syncInfo = oldSyncInfos.FirstOrDefault(i => i.LocalPath == localDirectory.CombinePath(filename));
 
-				if (conflictedFile == null)
+
+				if (newSyncFileInfo.UpdateFtpDetail)
 				{
 					// update ftpinfo so that we keep current state for next update
-					localInfo.Value.FtpInfo = ftpInfos.Files.Where(f => f.FileName == ftpPath).Select(f => f.FullInfo).FirstOrDefault();
+					newSyncFileInfo.FtpDetail = ftpInfos.Files.Where(f => f.FileName == ftpPath).Select(f => f.FtpDetail).FirstOrDefault();
 				}
 				else
 				{
 					// for conflicted files use old ftpinfo, so that it's used next time
-					localInfo.Value.FtpInfo = config.SyncInfos.Where(i => i.LocalPath == localInfo.Value.LocalPath).Select(i => i.FtpInfo).FirstOrDefault();
+					newSyncFileInfo.FtpDetail = config.SyncInfos.Where(i => i.LocalPath == newSyncFileInfo.LocalPath).Select(i => i.FtpDetail).FirstOrDefault();
 				}
 
-				config.UpdateLocalFile(localInfo.Value);
+				config.UpdateLocalFile(newSyncFileInfo);
 			}
 
-			// and that's it, incremental sync at its finest
+			// when directory is processed, rather perform save? It would be safer, but could slow down 
+			// the process when too many files :/
+			// config.Save();
 		}
 
-		private string GetFileFullInfo(string fullfilename)
+		private void Try(Action action, string initialMessage, string successMessage = "success", Action onSuccess = null, Action onError = null)
+		{
+			try
+			{
+				Log.Info(initialMessage, LogOptions.NoNewLine);
+				action();
+				Log.Info(successMessage);
+				if (onSuccess != null) onSuccess();
+			}
+			catch(Exception e)
+			{
+				Handle(e);
+				if (onError != null) onError();
+			}
+		}
+
+		private void Try<T>(Func<T> func, string initialMessage, Func<T, string> successMessage = null, Action<T> onSuccess = null, Action onError = null)
+		{
+			try
+			{
+				Log.Info(initialMessage, LogOptions.NoNewLine);
+				var result = func();
+				Log.Info(successMessage != null ? successMessage(result) : "");
+				if (onSuccess != null) onSuccess(result);
+			}
+			catch(Exception e)
+			{
+				Handle(e);
+				if (onError != null) onError();
+			}
+		}
+
+		private void Handle(Exception e)
+		{
+			Log.Error(e.Message);
+			Log.Error(e.StackTrace);
+		}
+
+		private static string GetFileFullInfo(string fullfilename)
 		{
 			var fileinfo = new FileInfo(fullfilename);
-			return "{0} {1}".Expand(fileinfo.CreationTime, fileinfo.Length);
+			return "{0} {1} {2}".Expand(fileinfo.CreationTime, fileinfo.LastWriteTime, fileinfo.Length);
 		}
 	}
 }

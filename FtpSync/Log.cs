@@ -4,6 +4,13 @@ using System;
 
 namespace FtpSync
 {
+	[Flags]
+	public enum LogOptions
+	{
+		None = 0x00,
+		NoNewLine = 0x01
+	}
+
 	public static class Log
 	{
 		private enum Severity
@@ -14,7 +21,7 @@ namespace FtpSync
 			Error
 		}
 
-		private static void Write(Severity severity, string message)
+		private static void Write(Severity severity, string message, LogOptions logOptions)
 		{
 			switch (severity)
 			{
@@ -32,27 +39,37 @@ namespace FtpSync
 					break;
 			}
 
-			Console.WriteLine(message);
+	
+			if ((logOptions & LogOptions.NoNewLine) == LogOptions.NoNewLine)
+			{
+				Console.Write(message);
+			}
+			else
+			{
+				Console.WriteLine(message);
+			}
+
+			Console.ForegroundColor = ConsoleColor.Gray;
 		}
 
-		public static void Verbose(string message)
+		public static void Verbose(string message, LogOptions logOptions = LogOptions.None)
 		{
-			Write(Severity.Verbose, message);
+			Write(Severity.Verbose, message, logOptions);
 		}
 
-		public static void Info(string message)
+		public static void Info(string message, LogOptions logOptions = LogOptions.None)
 		{
-			Write(Severity.Info, message);
+			Write(Severity.Info, message, logOptions);
 		}
 
-		public static void Warning(string message)
+		public static void Warning(string message, LogOptions logOptions = LogOptions.None)
 		{
-			Write(Severity.Warning, message);
+			Write(Severity.Warning, message, logOptions);
 		}
 
-		public static void Error(string message)
+		public static void Error(string message, LogOptions logOptions = LogOptions.None)
 		{
-			Write(Severity.Error, message);
+			Write(Severity.Error, message, logOptions);
 		}
 	}
 }

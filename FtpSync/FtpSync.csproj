@@ -45,6 +45,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Configuration.cs" />
+    <Compile Include="ConflictResolver.cs" />
     <Compile Include="FtpClient.cs" />
     <Compile Include="FtpDirInfo.cs" />
     <Compile Include="FtpFileInfo.cs" />

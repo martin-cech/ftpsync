@@ -2,6 +2,7 @@ using System.IO;
 using System.Linq;
 using System.Collections.Generic;
 using System;
+using System.Xml.Linq;
 
 namespace FtpSync
 {
@@ -52,7 +53,7 @@ namespace FtpSync
 
 		public static long WriteAll(this Stream s, Stream target)
 		{
-			var buf = new byte[16384];
+			var buf = new byte[65536];
 			long total = 0;
 			int len;
 			while ((len = s.Read(buf, 0, buf.Length)) > 0)
@@ -64,6 +65,26 @@ namespace FtpSync
 			s.Close();
 
 			return total;
+		}
+
+		public static bool SafeParseBool(this XElement xElement, string sonName, bool defaultValue = false)
+		{
+			if (xElement == null) return defaultValue;
+			var son = xElement.Element(sonName);
+			if (son == null) return defaultValue;
+
+			bool result;
+			if (bool.TryParse(son.Value, out result)) return result;
+
+			return defaultValue;
+		}
+
+		public static string GetSonValue(this XElement element, string sonName)
+		{
+			if (element == null) return string.Empty;
+			var son = element.Element(sonName);
+			if (son == null) return string.Empty;
+			return son.Value;
 		}
 	}
 }

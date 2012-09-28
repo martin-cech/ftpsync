@@ -7,6 +7,6 @@ namespace FtpSync
 	public class FtpFileInfo
 	{
 		public string FileName { get; set; }
-		public string FullInfo { get; set; }
+		public string FtpDetail { get; set; }
 	}
 }
