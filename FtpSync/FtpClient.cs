@@ -33,7 +33,13 @@ namespace FtpSync
 			Execute(WebRequestMethods.Ftp.RemoveDirectory, path);
 		}
 
-		public void DeleteDirectory(FtpDirInfo dirInfo, bool deleteRoot = true)
+		public void DeleteDirectory(string path)
+		{
+			var ftpDir = GetDirectoryContent(path, false);
+			DeleteDirectory(ftpDir, "", true);
+		}
+
+		public void DeleteDirectory(FtpDirInfo dirInfo, string root, bool deleteRoot = true)
 		{
 			if (!dirInfo.IsEmpty())
 			{
@@ -44,11 +50,11 @@ namespace FtpSync
 
 				foreach (var dir in dirInfo.Directories)
 				{
-					DeleteDirectory(dir);
+					DeleteDirectory(dir, root.CombineFtp(dirInfo.DirName));
 				}
 			}
 
-			if (deleteRoot) DeleteEmptyDirectory(dirInfo.DirName);
+			if (deleteRoot) DeleteEmptyDirectory(root.CombineFtp(dirInfo.DirName));
 		}
 
 		public void DeleteFile(string path)
@@ -81,22 +87,22 @@ namespace FtpSync
 			return ExecuteStream(WebRequestMethods.Ftp.DownloadFile, path);
 		}
 
-		public FtpDirInfo GetDirectoryContent(string path, bool recursive = true)
+		public FtpDirInfo GetDirectoryContent(string ftpPath, bool recursive = true)
 		{
-			var filelist = GetFileList(path).OrderByDescending(s => s.Length).ToArray();
-			var details = GetFileListDetail(path).ToList();
+			var filelist = GetFileList(ftpPath).OrderByDescending(s => s.Length).ToArray();
+			var details = GetFileListDetail(ftpPath).ToList();
 
-			var result = new FtpDirInfo {DirName = path};
+			var result = new FtpDirInfo {DirName = ftpPath};
 
-			foreach (var file in filelist)
+			foreach (var filename in filelist)
 			{
 				// THIS IS SHIT! if there are files with names like "a.php" and "a a.php", this fails. Oh my god...
 				// I need much smarter parser for detailed filelist, damned. Now we just go from longest file 
-				var fullInfo = details.FirstOrDefault(dir => dir.EndsWith(" " + file));
+				var fullInfo = details.FirstOrDefault(dir => dir.EndsWith(" " + filename));
 
 				if (fullInfo == null)
 				{
-					Log.Warning("Couldn't verify file {0} on server.".Expand(file));
+					Log.Warning("Couldn't verify file {0} on server.".Expand(filename));
 					continue;
 				}
 
@@ -107,16 +113,16 @@ namespace FtpSync
 				{
 					if (recursive)
 					{
-						result.AddDirectory(GetDirectoryContent(path.CombineFtp(file)), fullInfo);
+						result.AddDirectory(GetDirectoryContent(ftpPath.CombineFtp(filename)), fullInfo);
 					}
 					else
 					{
-						result.AddDirectory(file, fullInfo);
+						result.AddDirectory(filename, fullInfo);
 					}
 				}
 				else
 				{
-					result.AddFile(file, fullInfo);
+					result.AddFile(filename, fullInfo);
 				}
 			}
 
@@ -171,7 +177,7 @@ namespace FtpSync
 		{
 			try
 			{
-				Sync(_configuration.LocalFolder, GetDirectoryContent(_configuration.ServerRoot), _configuration);
+				Sync(_configuration.LocalFolder, _configuration.ServerRoot, "", _configuration);
 			}
 			catch(Exception ex)
 			{
@@ -183,9 +189,11 @@ namespace FtpSync
 		}
 
 
-		private void Sync(string localDirectory, FtpDirInfo ftpDirectory, Configuration config)
+		private void Sync(string localDirectory, string ftpDir, string parentDir, Configuration config)
 		{
 			var files = Directory.GetFiles(localDirectory);
+
+			var ftpDirectory = GetDirectoryContent(parentDir.CombineFtp(ftpDir), false);
 			var filesToDelete = ftpDirectory.Files.ToList();
 
 			var localFileInfos = new Dictionary<string, SyncFileInfo>();
@@ -214,12 +222,12 @@ namespace FtpSync
 
 					if (ftpInfo != null) filesToDelete.Remove(ftpInfo);
 
-					// untracked file
 					if (oldSyncInfo == null || string.IsNullOrEmpty(oldSyncInfo.FtpDetail))
 					{
+						// file is untracked => new on client
 						if (ftpInfo == null)
 						{
-							// file is not on server
+							// file is not on server -> simple upload
 							performUpload = true;
 						}
 						else
@@ -301,7 +309,10 @@ namespace FtpSync
 
 			foreach (var fileInfo in filesToDelete)
 			{
-				if (_conflictResolver.DeleteFile(fileInfo.FileName))
+				// file was already tracked and we deleted it
+				var isTracked = config.SyncInfos.Any(i => i.FtpDetail == fileInfo.FtpDetail);
+
+				if (isTracked || _conflictResolver.DeleteFile(fileInfo.FileName, isTracked))
 				{
 					Try(() => DeleteFile(fileInfo.FileName),
 					    "Deleting file {0}...".Expand(fileInfo.FileName));
@@ -319,7 +330,7 @@ namespace FtpSync
 				{
 					var dirname = new DirectoryInfo(localDir).Name;
 					var ftpFullPath = ftpDirectory.DirName.CombineFtp(dirname);
-					var subdirInfo = ftpDirectory.Directories.FirstOrDefault(d => d.DirName == ftpFullPath);
+					var subdirInfo = ftpDirectory.Directories.FirstOrDefault(d => d.DirName == dirname);
 
 					bool dirExists = true;
 
@@ -328,14 +339,14 @@ namespace FtpSync
 						// directory is not on server => create
 
 						Try(() => MakeDirectory(
-							path: ftpDirectory.DirName.CombineFtp(dirname)),
+							path: ftpFullPath),
 						    initialMessage: "Creating directory {0}...".Expand(dirname),
 						    onError: () =>
 						    	{
 						    		dirExists = false;
 						    	});
 
-						subdirInfo = new FtpDirInfo {DirName = ftpFullPath};
+						//subdirInfo = new FtpDirInfo {DirName = ftpFullPath};
 					}
 					else
 					{
@@ -344,7 +355,7 @@ namespace FtpSync
 
 					if (dirExists)
 					{
-						Sync(localDirectory.CombinePath(dirname), subdirInfo, config);
+						Sync(localDirectory.CombinePath(dirname), dirname, ftpDirectory.DirName, config);
 					}
 					else
 					{
@@ -362,10 +373,11 @@ namespace FtpSync
 				ftpDirsToDelete.ForEach(
 					dir =>
 						{
-							if (_conflictResolver.DeleteDirectory(dir.DirName))
+							var fullFtpDirname = ftpDirectory.DirName.CombineFtp(dir.DirName);
+							if (_conflictResolver.DeleteDirectory(fullFtpDirname))
 							{
 								Try(
-									() => DeleteDirectory(dir),
+									() => DeleteDirectory(fullFtpDirname),
 									"Deleting directory {0}...".Expand(dir.DirName)
 									);
 							}

@@ -6,7 +6,7 @@ namespace FtpSync
 	{
 		bool OverwriteServerModified(string filename);
 		bool OverwriteFileWhenNoLocalInfo(string filename);
-		bool DeleteFile(string fileName);
+		bool DeleteFile(string fileName, bool isTracked);
 		bool DeleteDirectory(string dirName);
 	}
 
@@ -30,9 +30,13 @@ namespace FtpSync
 			return Ask("File {0} is already on server but we don't know anything about it. Overwrite with your local file".Expand(filename));
 		}
 
-		public bool DeleteFile(string fileName)
+		public bool DeleteFile(string fileName, bool isTracked)
 		{
-			return Ask("File {0} was locally deleted, delete on server".Expand(fileName));
+			var question = isTracked
+			               	? "File {0} was locally deleted, delete on server".Expand(fileName)
+			               	: "File {0} is on server, but has never been on client. Delete".Expand(fileName);
+
+			return Ask(question);
 		}
 
 		public bool DeleteDirectory(string dirName)
@@ -60,7 +64,7 @@ namespace FtpSync
 			return _configuration.IgnoreInitialServerChanges;
 		}
 
-		public bool DeleteFile(string fileName)
+		public bool DeleteFile(string fileName, bool isTracked)
 		{
 			return !_configuration.KeepNonexistingLocalFilesOnServer;
 		}

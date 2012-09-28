@@ -7,7 +7,8 @@ namespace FtpSync
 	public class FtpDirInfo
 	{
 		public string DirName { get; set; }
-		public string FullInfo { get; set; }
+
+		public string FtpDetail { get; set; }
 
 		public List<FtpFileInfo> Files { get; private set; }
 		public List<FtpDirInfo> Directories { get; private set; }
@@ -23,19 +24,19 @@ namespace FtpSync
 			Directories = new List<FtpDirInfo>();
 		}
 
-		public void AddDirectory(string dir, string fullInfo = null)
+		public void AddDirectory(string dir, string ftpDetail = null)
 		{
-			AddDirectory(new FtpDirInfo { DirName = dir, FullInfo = fullInfo });
+			AddDirectory(new FtpDirInfo { DirName = dir, FtpDetail = ftpDetail });
 		}
 
-		public void AddFile(string filename, string fullInfo = null)
+		public void AddFile(string filename, string ftpDetail = null)
 		{
-			Files.Add(new FtpFileInfo { FileName = DirName.CombineFtp(filename), FtpDetail = fullInfo });
+			Files.Add(new FtpFileInfo { FileName = DirName.CombineFtp(filename), FtpDetail = ftpDetail });
 		}
 
-		public void AddDirectory(FtpDirInfo ftpDirInfo, string fullInfo = null)
+		public void AddDirectory(FtpDirInfo ftpDirInfo, string ftpDetail = null)
 		{
-			if (fullInfo != null) ftpDirInfo.FullInfo = fullInfo;
+			if (ftpDetail != null) ftpDirInfo.FtpDetail = ftpDetail;
 			Directories.Add(ftpDirInfo);
 		}
 	}

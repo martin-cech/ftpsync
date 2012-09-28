@@ -20,7 +20,13 @@ namespace FtpSync
 
 		private static string Combine(this string path1, IEnumerable<string> paths, char delimiter)
 		{
-			return path1.TrimEnd(delimiter) + delimiter + paths.Select(p => p.Trim(delimiter)).JoinWith(delimiter.ToString());
+			var rest = paths.Where(p => !string.IsNullOrEmpty(p)).Select(p => p.Trim(delimiter)).JoinWith(delimiter.ToString());
+
+			if (string.IsNullOrEmpty(path1)) return rest;
+
+			return path1.TrimEnd(delimiter)
+			       + delimiter
+			       + rest;
 		}
 
 		public static string CombineFtp(this string path1, params string[] paths)
