@@ -344,7 +344,6 @@ namespace FtpSync
 			}
 
 			// delete ftp directories which have been deleted on client (optional)
-			//if (!config.KeepNonexistingLocalFoldersOnServer)
 			{
 				ftpDirsToDelete.ForEach(
 					dir =>
@@ -370,12 +369,6 @@ namespace FtpSync
 
 				var ftpPath = ftpDirectory.DirName.CombineFtp(filename);
 
-				//if (filesToDelete.Any(fi => fi.FileName == ftpPath)) continue;
-				//var conflictedFile = conflictedFiles.FirstOrDefault(cf => cf.FileName == ftpPath);
-
-				//var syncInfo = oldSyncInfos.FirstOrDefault(i => i.LocalPath == localDirectory.CombinePath(filename));
-
-
 				if (newSyncFileInfo.UpdateFtpDetail)
 				{
 					// update ftpinfo so that we keep current state for next update
@@ -389,10 +382,6 @@ namespace FtpSync
 
 				config.UpdateLocalFile(newSyncFileInfo);
 			}
-
-			// when directory is processed, rather perform save? It would be safer, but could slow down 
-			// the process when too many files :/
-			// config.Save();
 		}
 
 		private void Try(Action action, string initialMessage, string successMessage = "success", Action onSuccess = null, Action onError = null)

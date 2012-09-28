@@ -14,9 +14,10 @@ namespace FtpSync
 	{
 		private bool Ask(string message)
 		{
+			Console.ForegroundColor = ConsoleColor.Gray;
 			Console.Write(message + (" (y/n)? "));
 			var s = Console.ReadLine();
-			return (s == "a") || (s == "A") || (s == "y") || (s == "Y");
+			return (s == "y") || (s == "Y");
 		}
 
 		public bool OverwriteServerModified(string filename)

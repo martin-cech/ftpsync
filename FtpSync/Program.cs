@@ -53,11 +53,12 @@ namespace FtpSync
 		private static void PrintUsage()
 		{
 			Console.WriteLine("Welcome to FtpSync.");
-			Console.WriteLine("Usage is quite hard to understand, but don't underestimate yourself!");
+			Console.WriteLine("Usage:");
 			Console.WriteLine("");
-			Console.WriteLine("\tftpsync.exe configfile");
+			Console.WriteLine("  ftpsync.exe configfile");
 			Console.WriteLine("");
-			Console.WriteLine("...yep, that's it. To see default config file, see default.cfg. Copy that, rewrite login info and use. Enjoy your life. Hunt a snowboarder or something.");
+			Console.WriteLine("");
+			Console.WriteLine("Yep, that's it. To see default config file, see default.cfg. Copy that file, rewrite login info and use. Enjoy your life. Hunt a snowboarder or something.");
 			Console.WriteLine("");
 
 			var dir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
