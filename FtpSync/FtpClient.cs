@@ -44,11 +44,11 @@ namespace FtpSync
 
 				foreach (var dir in ftpDir.Directories)
 				{
-					DeleteDirectory(GetDirectoryContent(dir.DirName, false));
+					DeleteDirectory(GetDirectoryContent(dir.FullPath, false));
 				}
 			}
 
-			if (deleteRoot) DeleteEmptyDirectory(ftpDir.DirName);
+			if (deleteRoot) DeleteEmptyDirectory(ftpDir.FullPath);
 		}
 
 		public void DeleteFile(string path)
@@ -81,12 +81,12 @@ namespace FtpSync
 			return ExecuteStream(WebRequestMethods.Ftp.DownloadFile, path);
 		}
 
-		public FtpDirInfo GetDirectoryContent(string ftpPath, bool recursive = true)
+		public FtpDirInfo GetDirectoryContent(string ftpPath, bool recursive = false)
 		{
 			var filelist = GetFileList(ftpPath).OrderByDescending(s => s.Length).ToArray();
 			var details = GetFileListDetail(ftpPath).ToList();
 
-			var result = new FtpDirInfo {DirName = ftpPath};
+			var result = new FtpDirInfo {FullPath = ftpPath};
 
 			foreach (var filename in filelist)
 			{
@@ -187,7 +187,7 @@ namespace FtpSync
 		{
 			var files = Directory.GetFiles(localDirectory);
 
-			var ftpDirectory = GetDirectoryContent(ftpDir);
+			var ftpDirectory = GetDirectoryContent(ftpDir, false);
 			var filesToDelete = ftpDirectory.Files.ToList();
 
 			var localFileInfos = new Dictionary<string, SyncFileInfo>();
@@ -205,7 +205,7 @@ namespace FtpSync
 				                   	};
 
 				bool performUpload = false;
-				var ftpInfo = ftpDirectory.Files.FirstOrDefault(i => i.FileName == ftpDirectory.DirName.CombineFtp(filename));
+				var ftpInfo = ftpDirectory.Files.FirstOrDefault(i => i.FileName == ftpDirectory.FullPath.CombineFtp(filename));
 
 				try
 				{
@@ -286,7 +286,7 @@ namespace FtpSync
 					if (performUpload)
 					{
 						Try(() =>
-						    UploadFile(fullfilename, ftpDirectory.DirName.CombineFtp(filename)),
+						    UploadFile(fullfilename, ftpDirectory.FullPath.CombineFtp(filename)),
 						    "Uploading file {0}...".Expand(filename),
 						    len => "{0} bytes uploaded".Expand(len));
 
@@ -323,8 +323,8 @@ namespace FtpSync
 				try
 				{
 					var dirname = new DirectoryInfo(localDir).Name;
-					var ftpFullPath = ftpDirectory.DirName.CombineFtp(dirname);
-					var subdirInfo = ftpDirectory.Directories.FirstOrDefault(d => d.DirName == ftpFullPath);
+					var ftpSubdirFullPath = ftpDirectory.FullPath.CombineFtp(dirname);
+					var subdirInfo = ftpDirectory.Directories.FirstOrDefault(d => d.FullPath == ftpSubdirFullPath);
 
 					bool dirExists = true;
 
@@ -333,14 +333,12 @@ namespace FtpSync
 						// directory is not on server => create
 
 						Try(() => MakeDirectory(
-							path: ftpFullPath),
+							path: ftpSubdirFullPath),
 						    initialMessage: "Creating directory {0}...".Expand(dirname),
 						    onError: () =>
 						    	{
 						    		dirExists = false;
 						    	});
-
-						//subdirInfo = new FtpDirInfo {DirName = ftpFullPath};
 					}
 					else
 					{
@@ -349,7 +347,7 @@ namespace FtpSync
 
 					if (dirExists)
 					{
-						Sync(localDirectory.CombinePath(dirname), ftpFullPath, config);
+						Sync(localDirectory.CombinePath(dirname), ftpSubdirFullPath, config);
 					}
 					else
 					{
@@ -367,18 +365,18 @@ namespace FtpSync
 				ftpDirsToDelete.ForEach(
 					ftpDirToDelete =>
 						{
-							if (_conflictResolver.DeleteDirectory(ftpDirToDelete.DirName))
+							if (_conflictResolver.DeleteDirectory(ftpDirToDelete.FullPath))
 							{
 								Try(
-									() => DeleteDirectory(ftpDirToDelete),
-									"Deleting directory {0}...".Expand(ftpDirToDelete.DirName)
+									() => DeleteDirectory(GetDirectoryContent(ftpDirToDelete.FullPath)),
+									"Deleting directory {0}...".Expand(ftpDirToDelete.FullPath)
 									);
 							}
 						});
 			}
 
 			// update ftpinfo on local settings to remember the current state for each file (not directories)
-			var ftpInfos = GetDirectoryContent(ftpDirectory.DirName, false);
+			var ftpInfos = GetDirectoryContent(ftpDirectory.FullPath, false);
 
 			// update local files state - we already have everything except ftpinfo in syncInfos
 			foreach (var localInfo in localFileInfos)
@@ -386,7 +384,7 @@ namespace FtpSync
 				var filename = localInfo.Key;
 				var newSyncFileInfo = localInfo.Value;
 
-				var ftpPath = ftpDirectory.DirName.CombineFtp(filename);
+				var ftpPath = ftpDirectory.FullPath.CombineFtp(filename);
 
 				if (newSyncFileInfo.UpdateFtpDetail)
 				{

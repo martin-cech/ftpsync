@@ -6,7 +6,7 @@ namespace FtpSync
 {
 	public class FtpDirInfo
 	{
-		public string DirName { get; set; }
+		public string FullPath { get; set; }
 
 		public string FtpDetail { get; set; }
 
@@ -26,12 +26,12 @@ namespace FtpSync
 
 		public void AddDirectory(string dir, string ftpDetail = null)
 		{
-			AddDirectory(new FtpDirInfo { DirName = this.DirName.CombineFtp(dir), FtpDetail = ftpDetail });
+			AddDirectory(new FtpDirInfo { FullPath = this.FullPath.CombineFtp(dir), FtpDetail = ftpDetail });
 		}
 
 		public void AddFile(string filename, string ftpDetail = null)
 		{
-			Files.Add(new FtpFileInfo { FileName = DirName.CombineFtp(filename), FtpDetail = ftpDetail });
+			Files.Add(new FtpFileInfo { FileName = FullPath.CombineFtp(filename), FtpDetail = ftpDetail });
 		}
 
 		public void AddDirectory(FtpDirInfo ftpDirInfo, string ftpDetail = null)
@@ -42,7 +42,7 @@ namespace FtpSync
 
 		public override string ToString()
 		{
-			return "{0} ({1} files, {2} subdirs)".Expand(DirName, Files.Count, Directories.Count);
+			return "{0} ({1} files, {2} subdirs)".Expand(FullPath, Files.Count, Directories.Count);
 		}
 	}
 }
