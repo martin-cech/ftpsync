@@ -28,8 +28,7 @@ namespace FtpSync
 				}
 				catch (Exception e)
 				{
-					Console.WriteLine(e.Message);
-					Console.WriteLine(e.StackTrace);
+					if (!FtpClient.Handle(e)) throw;
 				}
 			}
 

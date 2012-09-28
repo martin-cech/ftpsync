@@ -26,7 +26,7 @@ namespace FtpSync
 
 		public void AddDirectory(string dir, string ftpDetail = null)
 		{
-			AddDirectory(new FtpDirInfo { DirName = dir, FtpDetail = ftpDetail });
+			AddDirectory(new FtpDirInfo { DirName = this.DirName.CombineFtp(dir), FtpDetail = ftpDetail });
 		}
 
 		public void AddFile(string filename, string ftpDetail = null)
@@ -38,6 +38,11 @@ namespace FtpSync
 		{
 			if (ftpDetail != null) ftpDirInfo.FtpDetail = ftpDetail;
 			Directories.Add(ftpDirInfo);
+		}
+
+		public override string ToString()
+		{
+			return "{0} ({1} files, {2} subdirs)".Expand(DirName, Files.Count, Directories.Count);
 		}
 	}
 }

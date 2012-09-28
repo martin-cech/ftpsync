@@ -33,28 +33,22 @@ namespace FtpSync
 			Execute(WebRequestMethods.Ftp.RemoveDirectory, path);
 		}
 
-		public void DeleteDirectory(string path)
+		public void DeleteDirectory(FtpDirInfo ftpDir, bool deleteRoot = true)
 		{
-			var ftpDir = GetDirectoryContent(path, false);
-			DeleteDirectory(ftpDir, "", true);
-		}
-
-		public void DeleteDirectory(FtpDirInfo dirInfo, string root, bool deleteRoot = true)
-		{
-			if (!dirInfo.IsEmpty())
+			if (!ftpDir.IsEmpty())
 			{
-				foreach (var file in dirInfo.Files)
+				foreach (var file in ftpDir.Files)
 				{
 					DeleteFile(file.FileName);
 				}
 
-				foreach (var dir in dirInfo.Directories)
+				foreach (var dir in ftpDir.Directories)
 				{
-					DeleteDirectory(dir, root.CombineFtp(dirInfo.DirName));
+					DeleteDirectory(GetDirectoryContent(dir.DirName, false));
 				}
 			}
 
-			if (deleteRoot) DeleteEmptyDirectory(root.CombineFtp(dirInfo.DirName));
+			if (deleteRoot) DeleteEmptyDirectory(ftpDir.DirName);
 		}
 
 		public void DeleteFile(string path)
@@ -177,7 +171,7 @@ namespace FtpSync
 		{
 			try
 			{
-				Sync(_configuration.LocalFolder, _configuration.ServerRoot, "", _configuration);
+				Sync(_configuration.LocalFolder, _configuration.ServerRoot, _configuration);
 			}
 			catch(Exception ex)
 			{
@@ -189,11 +183,11 @@ namespace FtpSync
 		}
 
 
-		private void Sync(string localDirectory, string ftpDir, string parentDir, Configuration config)
+		private void Sync(string localDirectory, string ftpDir, Configuration config)
 		{
 			var files = Directory.GetFiles(localDirectory);
 
-			var ftpDirectory = GetDirectoryContent(parentDir.CombineFtp(ftpDir), false);
+			var ftpDirectory = GetDirectoryContent(ftpDir);
 			var filesToDelete = ftpDirectory.Files.ToList();
 
 			var localFileInfos = new Dictionary<string, SyncFileInfo>();
@@ -330,7 +324,7 @@ namespace FtpSync
 				{
 					var dirname = new DirectoryInfo(localDir).Name;
 					var ftpFullPath = ftpDirectory.DirName.CombineFtp(dirname);
-					var subdirInfo = ftpDirectory.Directories.FirstOrDefault(d => d.DirName == dirname);
+					var subdirInfo = ftpDirectory.Directories.FirstOrDefault(d => d.DirName == ftpFullPath);
 
 					bool dirExists = true;
 
@@ -355,7 +349,7 @@ namespace FtpSync
 
 					if (dirExists)
 					{
-						Sync(localDirectory.CombinePath(dirname), dirname, ftpDirectory.DirName, config);
+						Sync(localDirectory.CombinePath(dirname), ftpFullPath, config);
 					}
 					else
 					{
@@ -371,14 +365,13 @@ namespace FtpSync
 			// delete ftp directories which have been deleted on client (optional)
 			{
 				ftpDirsToDelete.ForEach(
-					dir =>
+					ftpDirToDelete =>
 						{
-							var fullFtpDirname = ftpDirectory.DirName.CombineFtp(dir.DirName);
-							if (_conflictResolver.DeleteDirectory(fullFtpDirname))
+							if (_conflictResolver.DeleteDirectory(ftpDirToDelete.DirName))
 							{
 								Try(
-									() => DeleteDirectory(fullFtpDirname),
-									"Deleting directory {0}...".Expand(dir.DirName)
+									() => DeleteDirectory(ftpDirToDelete),
+									"Deleting directory {0}...".Expand(ftpDirToDelete.DirName)
 									);
 							}
 						});
@@ -421,8 +414,8 @@ namespace FtpSync
 			}
 			catch(Exception e)
 			{
-				Handle(e);
 				if (onError != null) onError();
+				if (!Handle(e)) throw;
 			}
 		}
 
@@ -437,15 +430,21 @@ namespace FtpSync
 			}
 			catch(Exception e)
 			{
-				Handle(e);
 				if (onError != null) onError();
+				if (!Handle(e)) throw;
 			}
 		}
 
-		private void Handle(Exception e)
+		// TODO: out of this class
+		public static bool Handle(Exception e)
 		{
 			Log.Error(e.Message);
 			Log.Error(e.StackTrace);
+#if DEBUG
+			return false;
+#else
+			return true;
+#endif
 		}
 
 		private static string GetFileFullInfo(string fullfilename)
