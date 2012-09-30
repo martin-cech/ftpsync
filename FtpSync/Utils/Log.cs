@@ -2,15 +2,8 @@ using System.Linq;
 using System.Collections.Generic;
 using System;
 
-namespace FtpSync
+namespace FtpSync.Utils
 {
-	[Flags]
-	public enum LogOptions
-	{
-		None = 0x00,
-		NoNewLine = 0x01
-	}
-
 	public static class Log
 	{
 		private enum Severity

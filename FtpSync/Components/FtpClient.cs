@@ -4,23 +4,24 @@ using System.Collections.Generic;
 using System;
 using System.Net;
 using System.Text;
+using FtpSync.Helpers;
+using FtpSync.Utils;
 
-namespace FtpSync
+namespace FtpSync.Components
 {
 	public class FtpClient
 	{
 		private readonly Configuration _configuration;
+		private readonly TrackedFiles _trackedFiles;
 		private readonly NetworkCredential _credentials;
-		private readonly string _configPath;
-		private readonly IConflictResolver _conflictResolver;
+		private readonly ConflictResolver _conflictResolver;
 
-		public FtpClient(string configPath)
+		public FtpClient(string trackedFilesPath, Configuration configuration)
 		{
-			_configPath = configPath;
-			_configuration = Configuration.LoadFromFile(_configPath);
-			_credentials = new NetworkCredential(_configuration.Username, _configuration.Password);
-
-			_conflictResolver = _configuration.AskOnConflict ? (IConflictResolver) new CuriousConflictResolver() : new DefaultConflictResolver(_configuration);
+			_configuration = configuration;
+			_trackedFiles = TrackedFiles.TryLoad(trackedFilesPath);
+			_credentials = new NetworkCredential(configuration.Username, configuration.Password);
+			_conflictResolver = new ConflictResolver(_configuration);
 		}
 
 		public void MakeDirectory(string path)
@@ -90,8 +91,7 @@ namespace FtpSync
 
 			foreach (var filename in filelist)
 			{
-				// THIS IS SHIT! if there are files with names like "a.php" and "a a.php", this fails. Oh my god...
-				// I need much smarter parser for detailed filelist, damned. Now we just go from longest file 
+				// HACK here... but shh, that works quite smooth ow
 				var fullInfo = details.FirstOrDefault(dir => dir.EndsWith(" " + filename));
 
 				if (fullInfo == null)
@@ -100,7 +100,7 @@ namespace FtpSync
 					continue;
 				}
 
-				// remove it -> no conflicts with shitty files
+				// remove it from list - this must be here (because of conflict with suffix errors like a.php and aa.php)
 				details.Remove(fullInfo);
 
 				if (fullInfo.StartsWith("d"))
@@ -179,28 +179,30 @@ namespace FtpSync
 			}
 
 			// always save changes - if some files were uploaded, we need to know!
-			_configuration.Save();
+			_trackedFiles.Save();
 		}
 
 
-		private void Sync(string localDirectory, string ftpDir, Configuration config)
+		private void Sync(string localDirectory, string ftpPath, Configuration config)
 		{
-			var files = Directory.GetFiles(localDirectory);
+			var localFiles = Directory.GetFiles(localDirectory);
 
-			var ftpDirectory = GetDirectoryContent(ftpDir, false);
-			var filesToDelete = ftpDirectory.Files.ToList();
+			var ftpDirectory = GetDirectoryContent(ftpPath, false);
 
-			var localFileInfos = new Dictionary<string, SyncFileInfo>();
+			var unprocessedFiles = new HashSet<FtpFileInfo>(ftpDirectory.Files);
+			var localFileInfos = new HashSet<SyncFileInfo>();
+
+			_trackedFiles.TrackDirectory(localDirectory, ftpDirectory.FullPath);
 
 			// check all files in current directory
-			foreach (var fullfilename in files)
+			foreach (var localFilePath in localFiles)
 			{
-				var filename = Path.GetFileName(fullfilename);
+				var filename = Path.GetFileName(localFilePath);
 				var fullLocalPath = localDirectory.CombinePath(filename);
 				var syncFileInfo = new SyncFileInfo
 				                   	{
 				                   		LocalPath = fullLocalPath,
-				                   		LocalDetail = GetFileFullInfo(fullfilename),
+				                   		LocalDetail = GetFileFullInfo(localFilePath),
 				                   		UpdateFtpDetail = true
 				                   	};
 
@@ -209,12 +211,11 @@ namespace FtpSync
 
 				try
 				{
-					localFileInfos.Add(filename, syncFileInfo);
+					localFileInfos.Add(syncFileInfo);
 
-					var oldSyncInfo = config.SyncInfos.FirstOrDefault(i => i.LocalPath == fullLocalPath);
-
-
-					if (ftpInfo != null) filesToDelete.Remove(ftpInfo);
+					var oldSyncInfo = _trackedFiles.Files.ByLocalPath(fullLocalPath); //.FirstOrDefault(i => i.LocalPath == fullLocalPath);
+					
+					if (ftpInfo != null) unprocessedFiles.Remove(ftpInfo);
 
 					if (oldSyncInfo == null || string.IsNullOrEmpty(oldSyncInfo.FtpDetail))
 					{
@@ -230,14 +231,14 @@ namespace FtpSync
 							// Idea: we could download the file and compare, then we'd know if there is conflict or not,
 							// but if the files differ, we would still have to decide wheather overwrite or skip. This is easier.
 
-							if (_conflictResolver.OverwriteFileWhenNoLocalInfo(filename))
+							if (_conflictResolver.OverwriteUntrackedFile(filename))
 							{
-								Log.Warning("File {0} is already on server, overwritten (change IgnoreInitialServerChanges to skip).".Expand(filename));
+								Log.Warning("File {0} is already on server, overwritten.".Expand(filename));
 								performUpload = true;
 							}
 							else
 							{
-								Log.Warning("File {0} is already on server, skipped (change IgnoreInitialServerChanges to overwrite).".Expand(filename));
+								Log.Warning("File {0} is already on server, skipped.".Expand(filename));
 								syncFileInfo.UpdateFtpDetail = false;
 							}
 						}
@@ -257,7 +258,7 @@ namespace FtpSync
 							if (oldSyncInfo.FtpDetail == ftpInfo.FtpDetail)
 							{
 								// file has changed locally or we upload all files -> upload
-								if ((oldSyncInfo.LocalDetail != GetFileFullInfo(fullfilename)) || !config.UploadChangesOnly)
+								if ((oldSyncInfo.LocalDetail != GetFileFullInfo(localFilePath)) || !config.UploadChangesOnly)
 								{
 									performUpload = true;
 								}
@@ -271,12 +272,12 @@ namespace FtpSync
 								// server has different version than we have -> server change -> conflict
 								if (_conflictResolver.OverwriteServerModified(filename))
 								{
-									Log.Warning("File {0} modified on server, overwritten (change IgnoreServerChanges to skip).".Expand(filename));
+									Log.Warning("File {0} modified on server, overwritten.".Expand(filename));
 									performUpload = true;
 								}
 								else
 								{
-									Log.Warning("File {0} modified on server, skipped (change IgnoreServerChanges to overwrite).".Expand(filename));
+									Log.Warning("File {0} modified on server, skipped.".Expand(filename));
 									syncFileInfo.UpdateFtpDetail = false;
 								}
 							}
@@ -286,8 +287,8 @@ namespace FtpSync
 					if (performUpload)
 					{
 						Try(() =>
-						    UploadFile(fullfilename, ftpDirectory.FullPath.CombineFtp(filename)),
-						    "Uploading file {0}...".Expand(filename),
+						    UploadFile(localFilePath, ftpDirectory.FullPath.CombineFtp(filename)),
+						    "Uploading file {0}... ".Expand(filename),
 						    len => "{0} bytes uploaded".Expand(len));
 
 						//Log.Info("File {0} uploaded ({1} bytes)".Expand(filename, len));
@@ -301,15 +302,16 @@ namespace FtpSync
 				}
 			}
 
-			foreach (var fileInfo in filesToDelete)
+			// delete files
+			foreach (var fileInfo in unprocessedFiles)
 			{
-				// file was already tracked and we deleted it
-				var isTracked = config.SyncInfos.Any(i => i.FtpDetail == fileInfo.FtpDetail);
+				var isTracked = _trackedFiles.Files.ByFtpDetail(fileInfo.FtpDetail) != null;
 
-				if (isTracked || _conflictResolver.DeleteFile(fileInfo.FileName, isTracked))
+				// TODO: untracked files might be also downloaded and keep tracked!
+
+				if (_conflictResolver.DeleteFile(fileInfo.FileName, isTracked))
 				{
-					Try(() => DeleteFile(fileInfo.FileName),
-					    "Deleting file {0}...".Expand(fileInfo.FileName));
+					Try(() => DeleteFile(fileInfo.FileName), "Deleting file {0}...".Expand(fileInfo.FileName));
 				}
 			}
 
@@ -318,6 +320,7 @@ namespace FtpSync
 
 			var ftpDirsToDelete = ftpDirectory.Directories.ToList();
 
+			// check directories
 			foreach (var localDir in localDirs)
 			{
 				try
@@ -365,7 +368,9 @@ namespace FtpSync
 				ftpDirsToDelete.ForEach(
 					ftpDirToDelete =>
 						{
-							if (_conflictResolver.DeleteDirectory(ftpDirToDelete.FullPath))
+							bool isTracked = _trackedFiles.IsDirectoryTracked(ftpDirToDelete.FullPath);
+
+							if (_conflictResolver.DeleteDirectory(ftpDirToDelete.FullPath, isTracked))
 							{
 								Try(
 									() => DeleteDirectory(GetDirectoryContent(ftpDirToDelete.FullPath)),
@@ -381,27 +386,33 @@ namespace FtpSync
 			// update local files state - we already have everything except ftpinfo in syncInfos
 			foreach (var localInfo in localFileInfos)
 			{
-				var filename = localInfo.Key;
-				var newSyncFileInfo = localInfo.Value;
+				var filename = Path.GetFileName(localInfo.LocalPath);
+				var fullFtpPath = ftpDirectory.FullPath.CombineFtp(filename);
 
-				var ftpPath = ftpDirectory.FullPath.CombineFtp(filename);
-
-				if (newSyncFileInfo.UpdateFtpDetail)
+				if (localInfo.UpdateFtpDetail)
 				{
 					// update ftpinfo so that we keep current state for next update
-					newSyncFileInfo.FtpDetail = ftpInfos.Files.Where(f => f.FileName == ftpPath).Select(f => f.FtpDetail).FirstOrDefault();
+					localInfo.FtpDetail = ftpInfos.Files.Where(f => f.FileName == fullFtpPath).Select(f => f.FtpDetail).FirstOrDefault();
 				}
 				else
 				{
-					// for conflicted files use old ftpinfo, so that it's used next time
-					newSyncFileInfo.FtpDetail = config.SyncInfos.Where(i => i.LocalPath == newSyncFileInfo.LocalPath).Select(i => i.FtpDetail).FirstOrDefault();
+					// for conflicted files use old ftpinfo, so that it's used next time again
+					var fileInfo = _trackedFiles.Files.ByLocalPath(localInfo.LocalPath);
+					if (fileInfo != null)
+					{
+						localInfo.FtpDetail = fileInfo.FtpDetail;
+					}
+					else
+					{
+						Log.Warning("Could not update information for file {0}".Expand(localInfo.LocalPath));
+					}
 				}
 
-				config.UpdateLocalFile(newSyncFileInfo);
+				_trackedFiles.TrackFile(localInfo);
 			}
 		}
 
-		private void Try(Action action, string initialMessage, string successMessage = "success", Action onSuccess = null, Action onError = null)
+		private void Try(Action action, string initialMessage, string successMessage = " success", Action onSuccess = null, Action onError = null)
 		{
 			try
 			{

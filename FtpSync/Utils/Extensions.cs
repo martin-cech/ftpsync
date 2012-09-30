@@ -2,11 +2,13 @@ using System.IO;
 using System.Linq;
 using System.Collections.Generic;
 using System;
+using System.Linq.Expressions;
+using System.Reflection;
 using System.Xml.Linq;
 
-namespace FtpSync
+namespace FtpSync.Utils
 {
-	public static class FtpUtil
+	public static class Extensions
 	{
 		public static string Expand(this string s, params object[] args)
 		{
@@ -91,6 +93,65 @@ namespace FtpSync
 			var son = element.Element(sonName);
 			if (son == null) return string.Empty;
 			return son.Value;
+		}
+
+		public static T GetAttribute<T>(this MemberInfo propertyInfo, bool inherit = true)
+			where T : Attribute
+		{
+			return (T) propertyInfo.GetCustomAttributes(typeof (T), inherit).FirstOrDefault();
+		}
+
+		public static string GetMemberName(this Expression expression)
+		{
+			return expression.GetMemberInfo().Name;
+		}
+
+		public static MemberInfo GetMemberInfo(this Expression expression)
+		{
+			var lambda = (LambdaExpression)expression;
+
+			MemberExpression memberExpression;
+			if (lambda.Body is UnaryExpression)
+			{
+				var unaryExpression = (UnaryExpression)lambda.Body;
+				memberExpression = (MemberExpression)unaryExpression.Operand;
+			}
+			else memberExpression = (MemberExpression)lambda.Body;
+
+			return memberExpression.Member;
+		}
+
+		public static void PrintHighlighted(this string s, char c, ConsoleColor foreground = ConsoleColor.Yellow, ConsoleColor normal = ConsoleColor.Gray)
+		{
+			var index = s.ToLower().IndexOf(c);
+			if (index < 0)
+			{
+				Console.ForegroundColor = normal;
+				Console.Write(s);
+			}
+			else
+			{
+				Console.ForegroundColor = normal;
+				if (index > 0) Console.Write(s.Substring(0, index - 1));
+
+				Console.ForegroundColor = foreground;
+				Console.Write( index == 0 ? c.ToString().ToUpper() : c.ToString());
+
+				Console.ForegroundColor = normal;
+
+				if (index < s.Length) Console.Write(s.Substring(index + 1));
+			}
+		}
+
+		public static TValue TryGet<TKey,TValue>(this IDictionary<TKey, TValue> dictionary, TKey key, TValue defaultValue = default(TValue))
+		{
+			TValue result;
+			if (dictionary.TryGetValue(key, out result))
+			{
+				return result;
+			}
+
+			return defaultValue;
 		}
 	}
 }

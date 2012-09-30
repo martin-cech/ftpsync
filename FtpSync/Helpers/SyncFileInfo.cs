@@ -2,7 +2,7 @@ using System.Linq;
 using System.Collections.Generic;
 using System;
 
-namespace FtpSync
+namespace FtpSync.Helpers
 {
 	public class SyncFileInfo
 	{

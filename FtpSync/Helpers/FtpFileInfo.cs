@@ -1,8 +1,9 @@
 using System.Linq;
 using System.Collections.Generic;
 using System;
+using FtpSync.Utils;
 
-namespace FtpSync
+namespace FtpSync.Helpers
 {
 	public class FtpFileInfo
 	{

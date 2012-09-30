@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using FtpSync.Components;
 
 namespace FtpSync
 {
@@ -13,17 +14,19 @@ namespace FtpSync
 			//args = new[] {@"c:\Users\Pz\Documents\dev\praettest.cfg"};
 			args = new[] {@"c:\Users\Pz\Documents\dev\sync.cfg"};
 
-			if (!ParseArgs(args))
+			var configuration = ParseArgs(args);
+
+			if (configuration == null)
 			{
 				PrintUsage();
 			}
 			else
 			{
-				var configPath = args[0];
+				var trackedFilesPath = args[0];
 
 				try
 				{
-					var ftp = new FtpClient(configPath);
+					var ftp = new FtpClient(trackedFilesPath, configuration);
 					ftp.Synchronize();
 				}
 				catch (Exception e)
@@ -38,16 +41,18 @@ namespace FtpSync
 
 		}
 
-		private static bool ParseArgs(string[] args)
+		private static Configuration ParseArgs(string[] args)
 		{
-			if (args.Length == 0) return false;
-			if (!File.Exists(args[0]))
-			{
-				Console.WriteLine("File {0} does not exist.".Expand(args[0]));
-				return false;
-			}
+			if (args.Length == 0) return null;
 
-			return true;
+			// TODO: parse args
+			var configuration = Configuration.Default;
+			configuration.Username = "ftptest";
+			configuration.Password = "ftptest";
+			configuration.LocalFolder = @"c:\Users\Pz\Documents\dev\synctest\";
+			configuration.ServerRoot = @"ftp://127.0.0.1/root";
+
+			return configuration;
 		}
 
 		private static void PrintUsage()
@@ -57,17 +62,20 @@ namespace FtpSync
 			Console.WriteLine("");
 			Console.WriteLine("  ftpsync.exe configfile");
 			Console.WriteLine("");
-			Console.WriteLine("");
-			Console.WriteLine("Yep, that's it. To see default config file, see default.cfg. Copy that file, rewrite login info and use. Enjoy your life. Hunt a snowboarder or something.");
-			Console.WriteLine("");
+
 
 			var dir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
 			var cfgPath = Path.Combine(dir, "default.cfg");
+
 			if (!File.Exists(cfgPath))
 			{
-				Console.WriteLine("The config file has been created.");
+				TrackedFiles.Create(cfgPath).Save();
+			}
 
-				new Configuration(cfgPath)
+			/*
+			if (!File.Exists(cfgPath))
+			{
+				new Configuration()
 					{
 						Username = "your login here",
 						Password = "guess what here",
@@ -80,8 +88,8 @@ namespace FtpSync
 						IgnoreInitialServerChanges = false,
 						IgnoreServerChanges = false,
 						UploadChangesOnly = true
-					}.Save();
-			}
+					};
+			}*/
 		}
 	}
 }
